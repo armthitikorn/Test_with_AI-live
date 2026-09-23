@@ -291,7 +291,7 @@ const personas = {
   let conversationTranscript = []; 
   let currentEvaluationData = null;
 
-  // เปลี่ยนจากแสดงบนหน้าจอ เป็นซ่อนไว้ใน Console
+  // Log ทุกอย่างลง Console เพื่อให้ debug ง่าย (เปิด F12 ดูได้)
   function log(msg) {
     console.log(`[${new Date().toLocaleTimeString()}] ${msg}`);
   }
@@ -384,11 +384,18 @@ const personas = {
 
     try {
       micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
+
+      updateStatus("กำลังขอ API Key จากเซิร์ฟเวอร์...", "");
       const response = await fetch('/api/live');
+
+      if (!response.ok) {
+        throw new Error(`เรียก /api/live ไม่สำเร็จ (HTTP ${response.status})`);
+      }
+
       const data = await response.json();
 
       if (!data.key) {
-        updateStatus("ไม่พบ GEMINI_API_KEY", "error");
+        updateStatus("ไม่พบ GEMINI_API_KEY (เช็คฝั่งเซิร์ฟเวอร์)", "error");
         startBtn.disabled = false;
         isCalling = false;
         return;
@@ -406,6 +413,10 @@ const personas = {
       
       mediaRecorder.onstop = async () => {
         log("สิ้นสุดการอัดเสียง เตรียมวิเคราะห์ไฟล์...");
+        if (audioChunks.length === 0) {
+          log("ไม่มีข้อมูลเสียงที่บันทึกไว้ ข้ามการประเมิน");
+          return;
+        }
         const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
         employeeAudioBase64 = await blobToBase64(audioBlob);
         evaluateSessionWithAudio(); 
@@ -414,6 +425,15 @@ const personas = {
       const activePersonaData = personas[currentPersona];
       const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`;
       ws = new WebSocket(wsUrl);
+
+      // เพิ่ม timeout กันค้าง เผื่อ Google ไม่ตอบกลับอะไรเลย (เชื่อม TCP ติดแต่ไม่มี response)
+      const setupTimeout = setTimeout(() => {
+        if (ws && ws.readyState !== WebSocket.OPEN) {
+          log("Timeout: เชื่อมต่อ WebSocket นานเกินไป ปิดการเชื่อมต่อ");
+          updateStatus("เชื่อมต่อ AI ไม่สำเร็จ (Timeout)", "error");
+          ws.close();
+        }
+      }, 10000);
 
       ws.onopen = () => {
         log(`เชื่อมต่อ Live API สำเร็จ (${activePersonaData.name})`);
@@ -446,7 +466,15 @@ const personas = {
           if (rawData instanceof Blob) rawData = await rawData.text();
           let resData = JSON.parse(rawData);
 
+          // ดักข้อความ error ที่ฝั่ง Gemini ส่งกลับมาเป็น JSON (บางกรณีไม่ได้ปิด socket ทันที)
+          if (resData.error) {
+            log("Gemini API error: " + JSON.stringify(resData.error));
+            updateStatus("AI ปฏิเสธคำขอ: " + (resData.error.message || "ไม่ทราบสาเหตุ"), "error");
+            return;
+          }
+
           if (resData.setupComplete) {
+            clearTimeout(setupTimeout);
             updateStatus("กำลังสนทนา (พูดเสนอขายได้เลย)", "active");
             startMicStream(micStream);
             mediaRecorder.start();
@@ -471,7 +499,28 @@ const personas = {
         }
       };
 
-      ws.onclose = () => {
+      // เดิมไม่มี handler ตัวนี้เลย ทำให้เชื่อมต่อไม่สำเร็จแล้วไม่มีอะไรแจ้งเตือนบนจอ
+      ws.onerror = (event) => {
+        log("WebSocket error event: " + JSON.stringify(event));
+        updateStatus("เชื่อมต่อ AI ล้มเหลว (ดู Console เพื่อดูรายละเอียด)", "error");
+      };
+
+      // เดิม onclose ไม่รายงานสาเหตุการปิด ทำให้สถานะค้างอยู่ที่ "ส่งการตั้งค่าไปยัง AI..."
+      ws.onclose = (event) => {
+        clearTimeout(setupTimeout);
+        log(`WebSocket closed: code=${event.code}, reason=${event.reason || "(ไม่มี reason ส่งมา)"}`);
+
+        if (isCalling) {
+          // ปิดกลางคันโดยที่ผู้ใช้ไม่ได้กด "จบการสนทนา" เอง = ผิดปกติ ให้ขึ้น error
+          let reasonText = event.reason ? event.reason : `close code ${event.code}`;
+          if (event.code === 1008 || event.code === 1011) {
+            reasonText += " (มักเกิดจาก API key ไม่ถูกต้อง/ไม่มีสิทธิ์ใช้ Live API หรือปัญหา billing/quota ของโปรเจกต์ Google)";
+          } else if (event.code === 1006) {
+            reasonText += " (การเชื่อมต่อถูกตัดกะทันหัน มักเกิดจากเครือข่ายหรือ endpoint ปฏิเสธ handshake)";
+          }
+          updateStatus("การเชื่อมต่อ AI ถูกปิด: " + reasonText, "error");
+        }
+
         stopSessionResources();
         startBtn.style.display = "block";
         startBtn.disabled = false;
@@ -480,8 +529,9 @@ const personas = {
 
     } catch (err) {
       log("Error: " + err.message);
-      updateStatus("เปิดไมค์หรือสตรีมไม่สำเร็จ", "error");
+      updateStatus("เปิดไมค์หรือสตรีมไม่สำเร็จ: " + err.message, "error");
       startBtn.disabled = false;
+      isCalling = false;
       stopSessionResources();
     }
   }
@@ -525,6 +575,7 @@ const personas = {
   }
 
   function stopSession() {
+    isCalling = false; // ตั้งก่อน close เพื่อไม่ให้ onclose ขึ้น error ตอนผู้ใช้กดจบเองปกติ
     if (ws) ws.close();
     else stopSessionResources();
   }
