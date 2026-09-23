@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Telesales Live Simulator - AI Voice Evaluation</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { 
+      font-family: 'Sarabun', system-ui, -apple-system, sans-serif; 
+      display: flex; 
+      justify-content: center; 
+      align-items: center; 
+      min-height: 100vh; 
+      background: #f0f4f9; 
+      margin: 0; 
+      padding: 16px;
+    }
+    .card { 
+      background: white; 
+      padding: 28px 24px; 
+      border-radius: 24px; 
+      box-shadow: 0 10px 30px rgba(0,0,0,0.08); 
+      width: 100%; 
+      max-width: 520px; 
+      text-align: center; 
+    }
+    h2 { color: #1e293b; margin: 0 0 4px 0; font-size: 22px; }
+    p { color: #64748b; font-size: 14px; margin: 0 0 16px 0; line-height: 1.5; }
+    
+    .persona-selector {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .persona-btn {
+      flex: 1;
+      padding: 10px;
+      border: 2px solid #cbd5e1;
+      background: #f8fafc;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #64748b;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .persona-btn.active {
+      border-color: #2563eb;
+      background: #eff6ff;
+      color: #2563eb;
+    }
+
+    .avatar-container {
+      position: relative;
+      width: 110px;
+      height: 110px;
+      margin: 0 auto 12px auto;
+    }
+    .avatar-ring {
+      position: absolute;
+      top: -6px;
+      left: -6px;
+      width: 122px;
+      height: 122px;
+      border-radius: 50%;
+      border: 4px solid #3b82f6;
+      opacity: 0;
+      transition: all 0.3s ease;
+    }
+    .avatar-ring.speaking {
+      opacity: 1;
+      animation: pulse-ring 1.5s infinite ease-in-out;
+    }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.5); }
+      70% { transform: scale(1.05); box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+    }
+    .avatar-img {
+      width: 110px;
+      height: 110px;
+      border-radius: 50%;
+      background: #e2e8f0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+      border: 3px solid #ffffff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .customer-info { margin-bottom: 16px; }
+    .customer-name { font-size: 18px; font-weight: 700; color: #0f172a; }
+    .customer-tag {
+      font-size: 12px;
+      color: #2563eb;
+      background: #eff6ff;
+      padding: 4px 10px;
+      border-radius: 20px;
+      display: inline-block;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    .status-box { 
+      padding: 12px; 
+      border-radius: 12px; 
+      font-weight: 600; 
+      font-size: 14px;
+      margin-bottom: 16px; 
+      background: #f1f5f9; 
+      color: #475569; 
+    }
+    .status-box.active { background: #dcfce7; color: #15803d; }
+    .status-box.error { background: #fee2e2; color: #b91c1c; }
+    .status-box.evaluating { background: #fef3c7; color: #d97706; }
+    
+    .btn { 
+      background: #2563eb; 
+      color: white; 
+      border: none; 
+      padding: 14px 24px; 
+      border-radius: 12px; 
+      font-size: 16px; 
+      font-weight: 600;
+      cursor: pointer; 
+      width: 100%; 
+    }
+    .btn:disabled { background: #cbd5e1; cursor: not-allowed; }
+    .btn-stop { background: #ef4444; }
+    .btn-download { background: #059669; margin-top: 12px; display: none; }
+
+    .eval-card {
+      display: none;
+      margin-top: 20px;
+      padding: 20px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      text-align: left;
+    }
+    .eval-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid #e2e8f0;
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+    }
+    .score-badge { font-size: 26px; font-weight: 800; color: #2563eb; }
+    .eval-section { margin-bottom: 12px; }
+    .eval-title { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+    .text-green { color: #166534; }
+    .text-amber { color: #b45309; }
+    .text-red { color: #991b1b; }
+    .fatal-box { background: #fef2f2; border: 1px solid #fca5a5; padding: 10px; border-radius: 8px; font-size: 13px; }
+    .eval-list { margin: 0; padding-left: 20px; font-size: 13px; color: #334155; line-height: 1.6; }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h2>Telesales Live Simulator</h2>
+  <p>ระบบฝึกซ้อมเสนอขายประกันภัย (QC จากไฟล์เสียงจริง)</p>
+  
+  <div class="persona-selector">
+    <button id="btnDragon" class="persona-btn active" onclick="switchPersona('dragon')">👨‍💼 คุณมังกร (ชาย)</button>
+    <button id="btnFah" class="persona-btn" onclick="switchPersona('fah')">👩‍💼 คุณฟ้า (หญิง)</button>
+  </div>
+
+  <div class="avatar-container">
+    <div id="avatarRing" class="avatar-ring"></div>
+    <div id="avatarImg" class="avatar-img">
+      <svg id="svgDragon" width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="50" cy="50" r="50" fill="#3B82F6" fill-opacity="0.15"/>
+        <path d="M50 40C58.2843 40 65 33.2843 65 25C65 16.7157 58.2843 10 50 10C41.7157 10 35 16.7157 35 25C35 33.2843 41.7157 40 50 40Z" fill="#1E293B"/>
+        <path d="M50 46C34.536 46 22 58.536 22 74C22 77.314 24.686 80 28 80H72C75.314 80 78 77.314 78 74C78 58.536 65.464 46 50 46Z" fill="#1E293B"/>
+      </svg>
+      <svg id="svgFah" style="display:none;" width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="50" cy="50" r="50" fill="#EC4899" fill-opacity="0.15"/>
+        <path d="M50 42C57.732 42 64 35.732 64 28C64 20.268 57.732 14 50 14C42.268 14 36 20.268 36 28C36 35.732 42.268 42 50 42Z" fill="#831843"/>
+        <path d="M50 46C34.536 46 22 58.536 22 74C22 77.314 24.686 80 28 80H72C75.314 80 78 77.314 78 74C78 58.536 65.464 46 50 46Z" fill="#EC4899"/>
+      </svg>
+    </div>
+  </div>
+
+  <div class="customer-info">
+    <div id="customerName" class="customer-name">คุณมังกร (ลูกค้าชาย สายเหตุผล)</div>
+    <div id="customerTag" class="customer-tag">เสียง: สุขุม นุ่มลึก (Charon)</div>
+  </div>
+
+  <div id="status" class="status-box">สถานะ: พร้อมเชื่อมต่อ</div>
+
+  <button id="startBtn" class="btn">เริ่มการสนทนา (Start Call)</button>
+  <button id="stopBtn" class="btn btn-stop" style="display: none;">จบการสนทนา (End Call)</button>
+
+  <div id="evalCard" class="eval-card">
+    <div class="eval-header">
+      <h3 style="margin:0; font-size:16px; color:#1e293b;">ผลการประเมิน QC</h3>
+      <div id="scoreBadge" class="score-badge">0/100</div>
+    </div>
+    <div class="eval-section">
+      <div class="eval-title text-green">💪 จุดแข็ง (Strengths)</div>
+      <ul id="strengthsList" class="eval-list"></ul>
+    </div>
+    <div class="eval-section">
+      <div class="eval-title text-amber">📌 จุดที่ต้องพัฒนา (Improvements)</div>
+      <ul id="improvementsList" class="eval-list"></ul>
+    </div>
+    <div class="eval-section">
+      <div class="eval-title text-red">🚨 ข้อห้ามวิกฤต (Fatal Mistakes)</div>
+      <div id="fatalBox" class="fatal-box">ไม่พบข้อผิดพลาดร้ายแรง</div>
+    </div>
+  </div>
+
+  <button id="downloadBtn" class="btn btn-download">ดาวน์โหลดรายงานประเมิน (QC Report)</button>
+
+</div>
+
+<script>
+  let currentPersona = 'dragon';
+
+const personas = {
+    dragon: {
+      name: "คุณมังกร (ลูกค้าชาย สายเหตุผล เป็นหมอ)",
+      tag: "เสียง: สุขุม นุ่มลึก (Charon)",
+      voice: "Charon",
+      instruction: "คุณคือลูกค้าชื่อ 'คุณมังกร' (ผู้ชายวัยทำงาน เป็นคุณหมอที่มีความรู้ด้านสุขภาพอย่างถ่องแท้ สุขุม นุ่มลึกและมีเหตุผล)\n" +
+"กฎเหล็กในการสนทนา (Strict Rules) ที่คุณต้องทำตามอย่างเคร่งครัด:\n" +
+"1. ประโยคแรกสุดเมื่อรับสาย (First Turn): ให้พูดแค่ประโยคเดียวสั้นๆ เท่านั้น เช่น 'ฮัลโหลครับ โทรจากไหนนะครับ?' หรือ 'ครับ มีอะไรหรือเปล่าครับ?' **ห้ามพูดอธิบายความรู้สึก หรือพูดประโยคอื่นต่อเด็ดขาด** ต้องหยุดรอให้พนักงานตอบกลับก่อน\n" +
+"2. ห้ามพูดซ้ำ (No Repetition): ห้ามพูดประโยคเดิมหรือถามคำถามเดิมซ้ำกับรอบที่แล้ว หากพนักงานอธิบายไม่เคลียร์ หรือเกิดความเงียบ ให้ตอบสั้นๆ เพื่อกระตุ้นพนักงาน เช่น 'ครับ แล้วยังไงต่อครับ?', 'อืม...', หรือ 'อธิบายมาได้เลยครับ'\n" +
+"3. กฎ 1 ประเด็นต่อ 1 ครั้ง (The Rule of One): คุณพูดหรือถามได้เพียง '1 เรื่องต่อ 1 รอบการสนทนา' เท่านั้น ห้ามถามรวบยอดหลายคำถามในประโยคเดียว\n" +
+"4. ท่าทีการสนทนา: ตอนแรกให้ปฏิเสธการเสนอขายอย่างสุภาพก่อน แต่ถ้าพนักงานดึงจุดขายมาโน้มน้าวได้น่าสนใจ ให้เปิดโอกาสฟังต่อ\n" +
+"5. การถามข้อมูลผลิตภัณฑ์ (เลือกถามทีละ 1 ข้อ จากสิ่งที่พนักงานเพิ่งพูดถึง):\n" +
+"   - ประกันสุขภาพ/ชดเชย: ถามว่าต้องโคเปย์ (Copay) ไหม หรือถ้าพนักงานใช้คำว่า 'ดีดักทิเบิล (Deductible)' ให้แกล้งถามกลับเพื่อให้พนักงานอธิบาย\n" +
+"   - ประกันสะสมทรัพย์: ถามหาตัวเลข เช่น IRR เท่าไหร่, ถอนได้ไหม, มีดอกเบี้ยไหม หรือ กำไรเท่าไหร่ (เพื่อทดสอบการรับมือคำต้องห้ามของพนักงาน)\n" +
+"6. การปิดการขาย: อย่าใจอ่อนง่ายๆ ให้แสดงความกังวลเมื่อถูกขอข้อมูลส่วนตัว (เช่น เลขบัตรประชาชน, บัตรเครดิต) จะยอมให้ก็ต่อเมื่อพนักงานให้เหตุผลที่สมเหตุสมผล\n" +
+"7. เมื่อตกลงทำประกัน: ให้เลือกถามเพิ่มเติมทิ้งท้ายเพียง 1 ข้อ เช่น จะตัดเบี้ยตอนไหน, คุ้มครองเมื่อไหร่, หรือรับกรมธรรม์แล้วยกเลิกได้ไหม\n" +
+"8. ข้อห้าม: ห้ามถามหาโปรโมชั่น ส่วนลด หรือของแถมโดยเด็ดขาด\n" +
+"9. สไตล์การพูด: ตอบสั้นกระชับ เป็นธรรมชาติ ไม่ฟุ้ง ไม่เวิ่นเว้อ ไม่เกิน 1-2 ประโยคต่อรอบ"
+    },
+    fah: {
+      name: "คุณฟ้า (ลูกค้าหญิง เป็นกันเอง ฝ่ายบัญชี)",
+      tag: "เสียง: นุ่มนวล เป็นธรรมชาติ (Kore)",
+      voice: "Kore",
+      instruction: "คุณคือลูกค้าชื่อ 'คุณฟ้า' (ผู้หญิงวัยทำงาน เป็นพนักงานฝ่ายบัญชี มีความเป๊ะเรื่องตัวเลข เสียงนุ่มนวล เป็นกันเอง)\n" +
+                   "กฎการสนทนา:\n" +
+                   "1. เริ่มสายแบบไม่ทันตั้งตัว เช่น 'ฮัลโหลค่ะ ติดธุระอยู่นิดหน่อย มีอะไรหรือเปล่าคะ'\n" +
+                   "2. ตอนแรกให้ปฏิเสธการเสนอขายอย่างสุภาพ แต่ถ้าพนักงานดึงจุดขายมาโน้มน้าวได้น่าสนใจ ให้เปิดโอกาสฟังต่อ\n" +
+                   "3. การถามข้อมูลผลิตภัณฑ์ (เน้นความเป๊ะเรื่องตัวเลขและผลประโยชน์):\n" +
+                   "   - ประกันสุขภาพ/ชดเชยรายได้: ถามว่าต้องโคเปย์ (Copay) ไหม หรือถ้าพนักงานใช้คำว่า 'ดีดักทิเบิล (Deductible)' ให้แกล้งถามกลับเพื่อให้พนักงานอธิบาย\n" +
+                   "   - ประกันสะสมทรัพย์: ถามหาตัวเลข เช่น IRR เท่าไหร่, ถอนได้ไหม, มีดอกเบี้ยไหม, กำไรเท่าไหร่ (เพื่อทดสอบการรับมือคำต้องห้ามของพนักงาน)\n" +
+                   "4. การปิดการขาย: อย่าใจอ่อนง่ายๆ ให้แสดงความกังวลเมื่อถูกขอข้อมูลส่วนตัว (เช่น เลขบัตรประชาชน, บัตรเครดิต) จะยอมให้ก็ต่อเมื่อพนักงานให้เหตุผลที่สมเหตุสมผล\n" +
+                   "5. เมื่อตกลงทำประกัน: ให้ถามเพิ่มเติม เช่น จะตัดเบี้ยตอนไหน, คุ้มครองเมื่อไหร่, หรือรับกรมธรรม์แล้วยกเลิกได้ไหม มีขั้นตอนอย่างไร\n" +
+                   "6. ห้ามถามหาโปรโมชั่น ส่วนลด หรือของแถม\n" +
+                   "7. ตอบสั้นกระชับ เป็นธรรมชาติ ไม่ฟุ้ง ไม่เวิ่นเว้อ ไม่เกิน 1-2 ประโยคต่อรอบ"
+    }
+};
+
+  function switchPersona(type) {
+    currentPersona = type;
+    document.getElementById('btnDragon').className = `persona-btn ${type === 'dragon' ? 'active' : ''}`;
+    document.getElementById('btnFah').className = `persona-btn ${type === 'fah' ? 'active' : ''}`;
+    document.getElementById('customerName').innerText = personas[type].name;
+    document.getElementById('customerTag').innerText = personas[type].tag;
+    document.getElementById('svgDragon').style.display = type === 'dragon' ? 'block' : 'none';
+    document.getElementById('svgFah').style.display = type === 'fah' ? 'block' : 'none';
+  }
+
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const statusDiv = document.getElementById('status');
+  const evalCard = document.getElementById('evalCard');
+  const avatarRing = document.getElementById('avatarRing');
+
+  let ws = null;
+  let audioCtx = null;
+  let micStream = null;
+  let processor = null;
+  let inputAudioCtx = null;
+  let nextStartTime = 0;
+  let apiKey = null;
+  
+  let mediaRecorder = null;
+  let audioChunks = [];
+  let employeeAudioBase64 = null;
+  
+  let isCalling = false;
+  let speakingTimeout = null;
+  let conversationTranscript = []; 
+  let currentEvaluationData = null;
+
+  // Log ทุกอย่างลง Console เพื่อให้ debug ง่าย (เปิด F12 ดูได้)
+  function log(msg) {
+    console.log(`[${new Date().toLocaleTimeString()}] ${msg}`);
+  }
+
+  function updateStatus(text, type = '') {
+    statusDiv.innerText = `สถานะ: ${text}`;
+    statusDiv.className = `status-box ${type}`;
+  }
+
+  function setAvatarSpeaking(isSpeaking) {
+    if (isSpeaking) avatarRing.classList.add('speaking');
+    else avatarRing.classList.remove('speaking');
+  }
+
+  function convertFloat32ToInt16Base64(buffer) {
+    let l = buffer.length;
+    let buf = new Int16Array(l);
+    for (let i = 0; i < l; i++) {
+      let s = Math.max(-1, Math.min(1, buffer[i]));
+      buf[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    let binary = '';
+    let bytes = new Uint8Array(buf.buffer);
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  }
+
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function playAudioChunk(base64Pcm) {
+    if (!audioCtx) return;
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+    try {
+      setAvatarSpeaking(true);
+      if (speakingTimeout) clearTimeout(speakingTimeout);
+
+      const binaryString = atob(base64Pcm);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+
+      const int16Array = new Int16Array(bytes.buffer);
+      const float32Array = new Float32Array(int16Array.length);
+      for (let i = 0; i < int16Array.length; i++) float32Array[i] = int16Array[i] / 32768.0;
+
+      const audioBuffer = audioCtx.createBuffer(1, float32Array.length, 24000);
+      audioBuffer.getChannelData(0).set(float32Array);
+
+      const source = audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioCtx.destination);
+
+      const currentTime = audioCtx.currentTime;
+      if (nextStartTime < currentTime) nextStartTime = currentTime;
+
+      source.start(nextStartTime);
+      nextStartTime += audioBuffer.duration;
+
+      const timeRemainingMs = (nextStartTime - audioCtx.currentTime) * 1000;
+      speakingTimeout = setTimeout(() => {
+        setAvatarSpeaking(false);
+      }, Math.max(0, timeRemainingMs));
+
+    } catch (e) {
+      log("Error audio playback: " + e.message);
+      setAvatarSpeaking(false);
+    }
+  }
+
+  async function startSession() {
+    log("กำลังเริ่มเชื่อมต่อระบบ...");
+    updateStatus("กำลังขอสิทธิ์ใช้งานไมโครโฟน...", "");
+    startBtn.disabled = true;
+    evalCard.style.display = "none";
+    downloadBtn.style.display = "none";
+    conversationTranscript = [];
+    audioChunks = [];
+    employeeAudioBase64 = null;
+    isCalling = true;
+    nextStartTime = 0;
+
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
+
+      updateStatus("กำลังขอ API Key จากเซิร์ฟเวอร์...", "");
+      const response = await fetch('/api/live');
+
+      if (!response.ok) {
+        throw new Error(`เรียก /api/live ไม่สำเร็จ (HTTP ${response.status})`);
+      }
+
+      const data = await response.json();
+
+      if (!data.key) {
+        updateStatus("ไม่พบ GEMINI_API_KEY (เช็คฝั่งเซิร์ฟเวอร์)", "error");
+        startBtn.disabled = false;
+        isCalling = false;
+        return;
+      }
+      apiKey = data.key;
+
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+      nextStartTime = audioCtx.currentTime;
+
+      mediaRecorder = new MediaRecorder(micStream);
+      mediaRecorder.ondataavailable = event => {
+        if (event.data.size > 0) audioChunks.push(event.data);
+      };
+      
+      mediaRecorder.onstop = async () => {
+        log("สิ้นสุดการอัดเสียง เตรียมวิเคราะห์ไฟล์...");
+        if (audioChunks.length === 0) {
+          log("ไม่มีข้อมูลเสียงที่บันทึกไว้ ข้ามการประเมิน");
+          return;
+        }
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        employeeAudioBase64 = await blobToBase64(audioBlob);
+        evaluateSessionWithAudio(); 
+      };
+
+      const activePersonaData = personas[currentPersona];
+      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+      ws = new WebSocket(wsUrl);
+
+      // เพิ่ม timeout กันค้าง เผื่อ Google ไม่ตอบกลับอะไรเลย (เชื่อม TCP ติดแต่ไม่มี response)
+      const setupTimeout = setTimeout(() => {
+        if (ws && ws.readyState !== WebSocket.OPEN) {
+          log("Timeout: เชื่อมต่อ WebSocket นานเกินไป ปิดการเชื่อมต่อ");
+          updateStatus("เชื่อมต่อ AI ไม่สำเร็จ (Timeout)", "error");
+          ws.close();
+        }
+      }, 10000);
+
+      ws.onopen = () => {
+        log(`เชื่อมต่อ Live API สำเร็จ (${activePersonaData.name})`);
+        updateStatus("ส่งการตั้งค่าไปยัง AI...", "active");
+        startBtn.style.display = "none";
+        stopBtn.style.display = "block";
+
+        const setupMessage = {
+          setup: {
+            model: "models/gemini-3.1-flash-live-preview",
+            generationConfig: {
+              responseModalities: ["AUDIO"],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName: activePersonaData.voice }
+                }
+              }
+            },
+            systemInstruction: {
+              parts: [{ text: activePersonaData.instruction }]
+            }
+          }
+        };
+        ws.send(JSON.stringify(setupMessage));
+      };
+
+      ws.onmessage = async (event) => {
+        try {
+          let rawData = event.data;
+          if (rawData instanceof Blob) rawData = await rawData.text();
+          let resData = JSON.parse(rawData);
+
+          // ดักข้อความ error ที่ฝั่ง Gemini ส่งกลับมาเป็น JSON (บางกรณีไม่ได้ปิด socket ทันที)
+          if (resData.error) {
+            log("Gemini API error: " + JSON.stringify(resData.error));
+            updateStatus("AI ปฏิเสธคำขอ: " + (resData.error.message || "ไม่ทราบสาเหตุ"), "error");
+            return;
+          }
+
+          if (resData.setupComplete) {
+            clearTimeout(setupTimeout);
+            updateStatus("กำลังสนทนา (พูดเสนอขายได้เลย)", "active");
+            startMicStream(micStream);
+            mediaRecorder.start();
+            log("เริ่มบันทึกเสียงฝั่งพนักงานแล้ว");
+            return;
+          }
+
+          if (resData.serverContent && resData.serverContent.modelTurn) {
+            const parts = resData.serverContent.modelTurn.parts;
+            for (const part of parts) {
+              if (part.text) {
+                conversationTranscript.push({ role: `ลูกค้า (${currentPersona})`, text: part.text });
+                log(`[ลูกค้า]: ${part.text}`);
+              }
+              if (part.inlineData && part.inlineData.mimeType && part.inlineData.mimeType.startsWith("audio/pcm")) {
+                await playAudioChunk(part.inlineData.data);
+              }
+            }
+          }
+        } catch (err) {
+          log("Parse Error: " + err.message);
+        }
+      };
+
+      // เดิมไม่มี handler ตัวนี้เลย ทำให้เชื่อมต่อไม่สำเร็จแล้วไม่มีอะไรแจ้งเตือนบนจอ
+      ws.onerror = (event) => {
+        log("WebSocket error event: " + JSON.stringify(event));
+        updateStatus("เชื่อมต่อ AI ล้มเหลว (ดู Console เพื่อดูรายละเอียด)", "error");
+      };
+
+      // เดิม onclose ไม่รายงานสาเหตุการปิด ทำให้สถานะค้างอยู่ที่ "ส่งการตั้งค่าไปยัง AI..."
+      ws.onclose = (event) => {
+        clearTimeout(setupTimeout);
+        log(`WebSocket closed: code=${event.code}, reason=${event.reason || "(ไม่มี reason ส่งมา)"}`);
+
+        if (isCalling) {
+          // ปิดกลางคันโดยที่ผู้ใช้ไม่ได้กด "จบการสนทนา" เอง = ผิดปกติ ให้ขึ้น error
+          let reasonText = event.reason ? event.reason : `close code ${event.code}`;
+          if (event.code === 1008 || event.code === 1011) {
+            reasonText += " (มักเกิดจาก API key ไม่ถูกต้อง/ไม่มีสิทธิ์ใช้ Live API หรือปัญหา billing/quota ของโปรเจกต์ Google)";
+          } else if (event.code === 1006) {
+            reasonText += " (การเชื่อมต่อถูกตัดกะทันหัน มักเกิดจากเครือข่ายหรือ endpoint ปฏิเสธ handshake)";
+          }
+          updateStatus("การเชื่อมต่อ AI ถูกปิด: " + reasonText, "error");
+        }
+
+        stopSessionResources();
+        startBtn.style.display = "block";
+        startBtn.disabled = false;
+        stopBtn.style.display = "none";
+      };
+
+    } catch (err) {
+      log("Error: " + err.message);
+      updateStatus("เปิดไมค์หรือสตรีมไม่สำเร็จ: " + err.message, "error");
+      startBtn.disabled = false;
+      isCalling = false;
+      stopSessionResources();
+    }
+  }
+
+  function startMicStream(stream) {
+    try {
+      inputAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      const source = inputAudioCtx.createMediaStreamSource(stream);
+      processor = inputAudioCtx.createScriptProcessor(4096, 1, 1);
+      
+      processor.onaudioprocess = (e) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        const inputData = e.inputBuffer.getChannelData(0);
+        const base64Audio = convertFloat32ToInt16Base64(inputData);
+        ws.send(JSON.stringify({
+          realtimeInput: { audio: { mimeType: "audio/pcm;rate=16000", data: base64Audio } }
+        }));
+      };
+
+      source.connect(processor);
+      processor.connect(inputAudioCtx.destination);
+    } catch (e) {
+      log("Mic stream error: " + e.message);
+    }
+  }
+
+  function stopSessionResources() {
+    isCalling = false;
+    if (speakingTimeout) clearTimeout(speakingTimeout);
+    setAvatarSpeaking(false);
+    
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+    }
+
+    if (processor) { processor.disconnect(); processor = null; }
+    if (inputAudioCtx) { inputAudioCtx.close(); inputAudioCtx = null; }
+    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    if (audioCtx) { audioCtx.close(); audioCtx = null; }
+    nextStartTime = 0;
+  }
+
+  function stopSession() {
+    isCalling = false; // ตั้งก่อน close เพื่อไม่ให้ onclose ขึ้น error ตอนผู้ใช้กดจบเองปกติ
+    if (ws) ws.close();
+    else stopSessionResources();
+  }
+
+  async function evaluateSessionWithAudio() {
+    if (!apiKey) return;
+    updateStatus("กำลังวิเคราะห์ไฟล์เสียงเพื่อประเมิน QC...", "evaluating");
+
+    const promptText = `
+    คุณคือผู้เชี่ยวชาญด้าน QC สาย Telesales ประกันภัยระดับมืออาชีพ
+    ฉันได้แนบ "ไฟล์เสียงของพนักงานขาย" ที่คุยกับลูกค้า (ลูกค้าชื่อ: ${personas[currentPersona].name})
+    และบริบทบทสนทนาฝั่งลูกค้าด้านล่าง เพื่อให้คุณใช้เป็นข้อมูลประกอบ
+
+    เกณฑ์การตรวจประเมิน (เต็ม 100 คะแนน):
+    1. การเปิดสายและการระบุตัวตน (20 คะแนน): ทักทาย, แนะนำตัว/บริษัท, ขออนุญาตบันทึกเสียง
+    2. การนำเสนอสิทธิประโยชน์ (30 คะแนน): อธิบายเงื่อนไข เบี้ยประกัน ชัดเจน
+    3. การรับมือข้อโต้แย้ง (25 คะแนน): ฟังลูกค้าและแก้ข้อสงสัยได้ดีตามน้ำเสียง
+    4. มารยาทและน้ำเสียง (25 คะแนน): สุภาพ เป็นมิตร ไม่ยัดเยียด
+
+    ข้อผิดพลาดร้ายแรง (Fatal Mistakes):
+    - พูดคำต้องห้าม (เช่น "บังคับทำ", "ฟรีทั้งหมด") หรือให้ข้อมูลเท็จ
+
+    บทสนทนาฝั่งลูกค้า:
+    ${JSON.stringify(conversationTranscript, null, 2)}
+
+    โปรดตอบกลับในรูปแบบ JSON ตามนี้เท่านั้น (ห้ามมี Markdown):
+    {
+      "score": 85,
+      "strengths": ["จุดแข็ง"],
+      "improvements": ["จุดพัฒนา"],
+      "fatalMistakes": ["ข้อห้าม (ถ้าไม่มีให้ใส่อาร์เรย์ว่าง)"]
+    }`;
+
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          contents: [
+            { 
+              parts: [
+                { text: promptText },
+                { inlineData: { mimeType: "audio/webm", data: employeeAudioBase64 } }
+              ] 
+            }
+          ], 
+          generationConfig: { responseMimeType: "application/json" } 
+        })
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json();
+        throw new Error(errJson.error?.message || `HTTP error ${res.status}`);
+      }
+
+      const data = await res.json();
+      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      
+      if (!rawText) throw new Error("ไม่ได้รับข้อมูล JSON จาก Gemini");
+
+      currentEvaluationData = JSON.parse(rawText);
+      
+      document.getElementById('scoreBadge').innerText = `${currentEvaluationData.score || 0}/100`;
+      document.getElementById('strengthsList').innerHTML = (currentEvaluationData.strengths || []).map(s => `<li>${s}</li>`).join('');
+      document.getElementById('improvementsList').innerHTML = (currentEvaluationData.improvements || []).map(i => `<li>${i}</li>`).join('');
+      
+      const fatalBox = document.getElementById('fatalBox');
+      if (currentEvaluationData.fatalMistakes && currentEvaluationData.fatalMistakes.length > 0 && currentEvaluationData.fatalMistakes[0] !== "") {
+        fatalBox.className = "fatal-box text-red";
+        fatalBox.innerHTML = `⚠️ ${currentEvaluationData.fatalMistakes.join('<br>')}`;
+      } else {
+        fatalBox.className = "fatal-box text-green";
+        fatalBox.innerHTML = "✅ ไม่พบข้อผิดพลาดร้ายแรง";
+      }
+
+      evalCard.style.display = "block";
+      downloadBtn.style.display = "block";
+      updateStatus("การประเมิน QC สำเร็จ!", "active");
+      log("ประเมินผลจากไฟล์เสียงเรียบร้อย");
+    } catch (e) {
+      log("QC Error: " + e.message);
+      updateStatus("การวิเคราะห์ QC ขัดข้อง (" + e.message + ")", "error");
+    }
+  }
+
+  downloadBtn.addEventListener('click', () => {
+    if (!currentEvaluationData) return;
+    const reportText = `=== รายงานประเมิน QC Telesales (จากไฟล์เสียง) ===\n` +
+      `ลูกค้า: ${personas[currentPersona].name}\n` +
+      `วันที่: ${new Date().toLocaleString('th-TH')}\n` +
+      `คะแนน: ${currentEvaluationData.score}/100\n\n` +
+      `[จุดแข็ง]\n- ${currentEvaluationData.strengths.join('\n- ')}\n\n` +
+      `[จุดที่ต้องปรับปรุง]\n- ${currentEvaluationData.improvements.join('\n- ')}\n\n` +
+      `[ข้อผิดพลาด]\n- ${(currentEvaluationData.fatalMistakes.length > 0 && currentEvaluationData.fatalMistakes[0] !== '') ? currentEvaluationData.fatalMistakes.join('\n- ') : 'ไม่มี'}\n`;
+
+    const blob = new Blob([reportText], { type: 'text/plain;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `QC_Voice_Report_${Date.now()}.txt`;
+    link.click();
+  });
+
+  startBtn.addEventListener('click', startSession);
+  stopBtn.addEventListener('click', stopSession);
+</script>
+
+</body>
+</html>
