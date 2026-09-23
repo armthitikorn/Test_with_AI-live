@@ -610,7 +610,9 @@ const personas = {
     }`;
 
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`, {
+      // เปลี่ยนมาใช้ gemini-2.5-flash เพราะยืนยันแล้วว่าอยู่ใน free tier (~1,500 คำขอ/วัน)
+      // และรองรับ input เสียง (audio) ได้เหมือนเดิม
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
