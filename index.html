@@ -684,6 +684,165 @@
       document.getElementById('scoreBadge').innerText = `${currentEvaluationData.score || 0}/100`;
       document.getElementById('strengthsList').innerHTML = (currentEvaluationData.strengths || []).map(s => `<li>${s}</li>`).join('');
 // ===================================================================
+// วางแทนของเดิมตั้งแต่บรรทัด "const startBtn = ..." ไปจนถึงก่อน 
+// (ส่วนบนที่มี COMMON_RULES / personas / switchPersona เก็บไว้เหมือนเดิม)
+// ===================================================================
+const EVAL_WITH_AUDIO = false; // true = ส่งไฟล์เสียงไปประเมินน้ำเสียงด้วย (กินโควต้ามากขึ้น)
+const SILENCE_MS = 1600;       // เงียบเท่านี้ = พนักงานพูดจบประโยค
+const MAX_HISTORY = 14;        // ส่งประวัติย้อนหลังกี่ข้อความ (ลดโทเค็น)
+
+const OPENERS = {
+  dragon: ["ฮัลโหลครับ", "ครับ มีอะไรหรือเปล่าครับ", "ครับ โทรมาจากไหนนะครับ"],
+  fah: ["ฮัลโหลค่ะ", "ค่ะ ติดธุระอยู่นิดหน่อย มีอะไรหรือเปล่าคะ"]
+};
+const TTS_VOICES = { dragon: "th-TH-Chirp3-HD-Charon", fah: "th-TH-Chirp3-HD-Kore" };
+
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+const statusDiv = document.getElementById('status');
+const evalCard = document.getElementById('evalCard');
+const avatarRing = document.getElementById('avatarRing');
+const player = new Audio();
+
+let state = 'idle', isCalling = false, recognition = null, silenceTimer = null;
+let history = [], transcript = [], currentEvaluationData = null;
+let micStream = null, mediaRecorder = null, audioChunks = [];
+
+function log(msg) { console.log(`[${new Date().toLocaleTimeString()}] ${msg}`); }
+function updateStatus(text, type = '') { statusDiv.innerText = `สถานะ: ${text}`; statusDiv.className = `status-box ${type}`; }
+function setAvatarSpeaking(on) { avatarRing.classList.toggle('speaking', on); }
+function blobToBase64(blob) {
+  return new Promise((res, rej) => { const r = new FileReader(); r.onloadend = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(blob); });
+}
+async function postJSON(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+  return d;
+}
+function unlockAudio() { // ต้องเรียกตอนกดปุ่ม เพื่อให้มือถือยอมเล่นเสียง
+  player.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
+  player.play().then(() => player.pause()).catch(() => {});
+}
+
+// ---------- เสียงลูกค้า: Cloud TTS (ฟรี 1M ตัวอักษร/เดือน) -> ถ้าพลาดใช้เสียงของเบราว์เซอร์ (ฟรีไม่จำกัด) ----------
+function browserSpeak(text) {
+  return new Promise(res => {
+    if (!window.speechSynthesis) return res();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'th-TH'; u.onend = res; u.onerror = res;
+    speechSynthesis.speak(u);
+  });
+}
+async function speak(text) {
+  state = 'speaking'; setAvatarSpeaking(true);
+  updateStatus("ลูกค้ากำลังพูด...", "active");
+  try {
+    const d = await postJSON('/api/tts', { text, voice: TTS_VOICES[currentPersona] });
+    if (!isCalling) return;
+    player.src = "data:audio/mp3;base64," + d.audio;
+    await new Promise(res => { player.onended = res; player.onerror = res; player.play().catch(res); });
+  } catch (e) {
+    log("TTS ใช้ไม่ได้ สลับเป็นเสียงเบราว์เซอร์: " + e.message);
+    if (isCalling) await browserSpeak(text);
+  }
+  setAvatarSpeaking(false);
+}
+
+// ---------- เสียงพนักงาน: Web Speech API ของเบราว์เซอร์ (ไม่เสียโควต้า API) ----------
+function initRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+  const r = new SR();
+  r.lang = 'th-TH'; r.continuous = true; r.interimResults = true;
+  r.onresult = (e) => {
+    if (state !== 'listening') return;
+    const text = Array.from(e.results).map(x => x[0].transcript).join('').trim();
+    if (!text) return;
+    updateStatus("กำลังฟัง: " + text, "active");
+    clearTimeout(silenceTimer);
+    silenceTimer = setTimeout(() => onEmployeeSpoke(text), SILENCE_MS);
+  };
+  r.onend = () => { if (isCalling && state === 'listening') { try { r.start(); } catch (e) {} } };
+  r.onerror = (e) => {
+    log("STT error: " + e.error);
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') updateStatus("ไม่ได้รับสิทธิ์ไมโครโฟน หรือเบราว์เซอร์ไม่อนุญาตให้รับเสียง", "error");
+  };
+  return r;
+}
+function listen(errMsg) {
+  if (!isCalling) return;
+  state = 'listening';
+  if (errMsg) updateStatus(errMsg, "error"); else updateStatus("กำลังฟัง (พูดเสนอขายได้เลย)", "active");
+  try { recognition.start(); } catch (e) {}
+}
+
+async function onEmployeeSpoke(text) {
+  if (!isCalling) return;
+  state = 'thinking';
+  try { recognition.stop(); } catch (e) {}
+  transcript.push({ who: 'พนักงาน', text });
+  updateStatus("ลูกค้ากำลังคิด...", "evaluating");
+  let errMsg = null;
+  try {
+    const d = await postJSON('/api/chat', {
+      system: personas[currentPersona].instruction,
+      history: history.slice(-MAX_HISTORY),
+      message: text
+    });
+    if (!isCalling) return;
+    history.push({ role: 'user', text }, { role: 'model', text: d.reply });
+    transcript.push({ who: 'ลูกค้า', text: d.reply });
+    await speak(d.reply);
+  } catch (e) {
+    log("Chat error: " + e.message);
+    errMsg = "ติดต่อ AI ไม่สำเร็จ: " + e.message + " (พูดใหม่ได้)";
+  }
+  listen(errMsg);
+}
+
+async function startSession() {
+  recognition = recognition || initRecognition();
+  if (!recognition) { updateStatus("เบราว์เซอร์นี้ไม่รองรับการรับเสียงพูด (ใช้ Chrome หรือ Edge)", "error"); return; }
+  unlockAudio();
+  startBtn.style.display = 'none'; stopBtn.style.display = 'block';
+  evalCard.style.display = 'none'; downloadBtn.style.display = 'none';
+  history = [{ role: 'user', text: '(สายโทรเข้า)' }]; transcript = []; audioChunks = [];
+  isCalling = true;
+
+  if (EVAL_WITH_AUDIO) {
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(micStream);
+      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+      mediaRecorder.start();
+    } catch (e) { log("เปิดอัดเสียงไม่ได้: " + e.message); }
+  }
+
+  const list = OPENERS[currentPersona];
+  const opener = list[Math.floor(Math.random() * list.length)];
+  history.push({ role: 'model', text: opener });
+  transcript.push({ who: 'ลูกค้า', text: opener });
+  await speak(opener); // ประโยคเปิดสายไม่ผ่าน LLM จึงไม่เสียโควต้าแชท
+  listen();
+}
+
+async function stopSession() {
+  isCalling = false; state = 'idle';
+  clearTimeout(silenceTimer);
+  try { recognition.stop(); } catch (e) {}
+  player.pause();
+  if (window.speechSynthesis) speechSynthesis.cancel();
+  setAvatarSpeaking(false);
+  stopBtn.style.display = 'none'; startBtn.style.display = 'block'; startBtn.disabled = false;
+
+  let audioB64 = null;
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    audioB64 = await new Promise(res => {
+      mediaRecorder.onstop = async () => res(audioChunks.length ? await blobToBase64(new Blob(audioChunks, { type: 'audio/webm' })) : null);
+      mediaRecorder.stop();
+// ===================================================================
 // วางแทนของเดิมตั้งแต่บรรทัด "const startBtn = ..." ไปจนถึงก่อน </script>
 // (ส่วนบนที่มี COMMON_RULES / personas / switchPersona เก็บไว้เหมือนเดิม)
 // ===================================================================
@@ -892,6 +1051,7 @@ downloadBtn.addEventListener('click', () => {
 
 startBtn.addEventListener('click', startSession);
 stopBtn.addEventListener('click', stopSession);
+
 </script>
 
 </body>
