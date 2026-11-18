@@ -1,7 +1,0 @@
-{
-  "name": "telesales-live-simulator",
-  "private": true,
-  "dependencies": {
-    "@google/genai": "^1.0.0"
-  }
-}
