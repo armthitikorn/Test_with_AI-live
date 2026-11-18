@@ -71,6 +71,7 @@ p{color:#64748b;font-size:14px;margin:0 0 16px;line-height:1.5}
     <div class="eval-section"><div class="eval-title text-amber">📌 จุดที่ต้องพัฒนา</div><ul id="improvementsList" class="eval-list"></ul></div>
     <div class="eval-section"><div class="eval-title text-red">🚨 ข้อห้ามวิกฤต</div><div id="fatalBox" class="fatal-box"></div></div>
   </div>
+  <button id="retryBtn" class="btn" style="display:none;margin-top:12px;background:#f59e0b">🔄 ลองวิเคราะห์ QC อีกครั้ง</button>
   <button id="downloadBtn" class="btn btn-download">ดาวน์โหลดรายงานประเมิน (QC Report)</button>
 </div>
 
@@ -289,7 +290,7 @@ muteBtn.onclick=()=>{
 async function startSession(){
   if(isCalling||evaluating) return;
   updateStatus("กำลังขอสิทธิ์ใช้งานไมโครโฟน...");
-  startBtn.disabled=true; evalCard.style.display="none"; downloadBtn.style.display="none";
+  startBtn.disabled=true; evalCard.style.display="none"; downloadBtn.style.display="none"; $('retryBtn').style.display="none";
   conversationTranscript=[]; audioChunks=[]; employeeAudioBase64=null; currentEvaluationData=null;
   sessionPersona=currentPersona; isCalling=true; cleaned=false; renderPersonas();
 
@@ -421,8 +422,10 @@ async function geminiGenerate(body){
   return res.json();
 }
 
+let lastMime=null;
 async function evaluateSessionWithAudio(mime){
   if(!apiKey&&!liveToken) return;
+  lastMime=mime; $('retryBtn').style.display="none";
   evaluating=true; startBtn.disabled=true;
   updateStatus("กำลังวิเคราะห์ไฟล์เสียงเพื่อประเมิน QC...","evaluating");
   const transcript=conversationTranscript.map(t=>`${t.role}: ${t.text}`).join("\n")||"(ไม่มี transcript)";
@@ -466,7 +469,8 @@ ${transcript}
     updateStatus("การประเมิน QC สำเร็จ!","active");
   }catch(e){
     log("QC Error: "+e.message);
-    updateStatus("การวิเคราะห์ QC ขัดข้อง ("+e.message+")","error");
+    updateStatus("การวิเคราะห์ QC ขัดข้อง ("+e.message+") กดปุ่มด้านล่างเพื่อลองใหม่ได้ ไฟล์เสียงยังอยู่","error");
+    $('retryBtn').style.display="block";
   }finally{
     evaluating=false; startBtn.disabled=isCalling;
   }
@@ -486,6 +490,7 @@ downloadBtn.addEventListener('click',()=>{
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 });
 
+$('retryBtn').addEventListener('click',()=>{ if(employeeAudioBase64&&!evaluating) evaluateSessionWithAudio(lastMime); });
 startBtn.addEventListener('click',startSession);
 stopBtn.addEventListener('click',stopSession);
 window.addEventListener('beforeunload',()=>{ if(ws) ws.close(); });
